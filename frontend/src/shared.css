@@ -1,0 +1,214 @@
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.page-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #1a365d;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  text-decoration: none;
+}
+
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-primary { background: #2b6cb0; color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #2c5282; }
+
+.btn-secondary { background: #e2e8f0; color: #2d3748; }
+.btn-secondary:hover:not(:disabled) { background: #cbd5e0; }
+
+.btn-danger { background: #e53e3e; color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #c53030; }
+
+.btn-success { background: #38a169; color: #fff; }
+.btn-success:hover:not(:disabled) { background: #2f855a; }
+
+.btn-sm { padding: 5px 12px; font-size: 0.82rem; }
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+
+.table th {
+  background: #edf2f7;
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f4f8;
+  font-size: 0.93rem;
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover { background: #f7fafc; }
+
+.col-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.col-actions .btn + .btn { margin-left: 6px; }
+
+.loading { color: #718096; padding: 24px 0; font-size: 0.95rem; }
+
+.error-msg {
+  color: #c53030;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 0.9rem;
+}
+
+.empty-state {
+  background: #fff;
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  color: #718096;
+  font-size: 1rem;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 14px;
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+}
+
+.modal-sm { max-width: 360px; }
+
+.modal-title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #1a365d;
+  margin-bottom: 20px;
+}
+
+.modal p {
+  color: #4a5568;
+  margin-bottom: 20px;
+  font-size: 0.95rem;
+}
+
+.form-group { margin-bottom: 16px; }
+
+.form-group label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #4a5568;
+  margin-bottom: 6px;
+}
+
+.required { color: #e53e3e; }
+
+.input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 7px;
+  font-size: 0.93rem;
+  font-family: inherit;
+  transition: border-color 0.15s;
+  color: #1a202c;
+  background: #fff;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #2b6cb0;
+  box-shadow: 0 0 0 3px rgba(43,108,176,0.12);
+}
+
+textarea.input { resize: vertical; }
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.badge-success { background: #c6f6d5; color: #276749; }
+.badge-warning { background: #fefcbf; color: #744210; }
+.badge-info    { background: #bee3f8; color: #2a4365; }
+
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid #e2e8f0;
+  margin-bottom: 20px;
+}
+
+.tab-btn {
+  padding: 9px 20px;
+  background: none;
+  border: none;
+  font-size: 0.93rem;
+  font-weight: 600;
+  color: #718096;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-btn.active {
+  color: #2b6cb0;
+  border-bottom-color: #2b6cb0;
+}
+
+.tab-btn:hover:not(.active) { color: #4a5568; }
