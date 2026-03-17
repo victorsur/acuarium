@@ -1,0 +1,18 @@
+# Dependencias principales para la API REST con FastAPI, SQLAlchemy y MySQL
+fastapi>=0.115
+uvicorn[standard]
+sqlalchemy>=2.0
+aiomysql
+python-dotenv
+pydantic[email]>=2.0
+pymysql
+cryptography
+httpx>=0.23
+# Autenticación JWT
+python-jose[cryptography]
+bcrypt>=4.0
+python-multipart
+email-validator>=2.0
+# Otros útiles para desarrollo y pruebas
+pytest
+pytest-asyncio

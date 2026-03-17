@@ -1,0 +1,1593 @@
+openapi: 3.0.1
+
+info:
+  title: Acuarium Management API
+  version: 2.0.0
+  description: |
+    API REST para la gestión de un acuario: peces, plantas, iluminación y mantenimiento.
+
+    Desarrollada con **SDD (Spec Driven Development)**: este archivo es la fuente de verdad
+    del proyecto. Todo el código — backend y frontend — se construye a partir de este contrato.
+
+    ## Autenticación
+    La API usa **JWT Bearer tokens**. Para acceder a los endpoints protegidos:
+    1. Obtén un token haciendo `POST /auth/login`
+    2. Incluye el token en la cabecera: `Authorization: Bearer <token>`
+
+    ## Roles
+    - `ROLE_ADMIN` → acceso total (CRUD completo + gestión de usuarios + DELETE en todas las entidades)
+    - `ROLE_USER`  → lectura y escritura sobre sus propios recursos (GET / POST / PUT)
+
+    ### Tabla de permisos por endpoint
+
+    | Método | Endpoint          | ROLE_USER  | ROLE_ADMIN |
+    |--------|-------------------|------------|------------|
+    | POST   | /auth/register    | ✗          | ✓          |
+    | POST   | /auth/login       | público    | público    |
+    | POST   | /auth/refresh     | público    | público    |
+    | GET    | /auth/me          | ✓          | ✓          |
+    | GET    | /{recurso}        | ✓          | ✓          |
+    | POST   | /{recurso}        | ✓          | ✓          |
+    | GET    | /{recurso}/{id}   | ✓          | ✓          |
+    | PUT    | /{recurso}/{id}   | ✓ (propio) | ✓          |
+    | DELETE | /{recurso}/{id}   | ✗          | ✓          |
+
+    ## Versiones
+    - `v1.0.0` — CRUD base (peces, plantas, iluminación, mantenimiento, acuario)
+    - `v2.0.0` — Autenticación JWT + roles de usuario
+
+servers:
+  - url: http://localhost:8000
+    description: Servidor de desarrollo local
+
+# Seguridad global: todos los endpoints requieren Bearer JWT
+# excepto /auth/login y /auth/refresh que la sobreescriben con security: []
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Autenticación y gestión de usuarios
+  - name: acuario
+    description: Gestión de acuarios
+  - name: fish
+    description: Gestión de peces
+  - name: plants
+    description: Gestión de plantas
+  - name: lighting
+    description: Gestión de iluminación
+  - name: maintenance
+    description: Tareas de mantenimiento
+
+
+# ============================================================
+# PATHS
+# ============================================================
+paths:
+
+  # ----------------------------------------------------------
+  # AUTH
+  # ----------------------------------------------------------
+
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Registrar un nuevo usuario
+      operationId: registerUser
+      description: |
+        Crea un nuevo usuario en el sistema.
+
+        **Roles requeridos:** `ROLE_ADMIN`
+      security:
+        - bearerAuth: []
+      x-required-roles: [ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserRegister'
+            example:
+              username: "victor"
+              email: "victor@example.com"
+              password: "Secret1234!"
+              role: "ROLE_USER"
+      responses:
+        '201':
+          description: Usuario creado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: El nombre de usuario o email ya existe
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Username already registered"
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Iniciar sesión y obtener tokens JWT
+      operationId: loginUser
+      description: |
+        Autentica al usuario con sus credenciales y devuelve un `access_token`
+        (válido 30 minutos) y un `refresh_token` (válido 7 días).
+
+        **Endpoint público** — no requiere autenticación previa.
+      security: []
+      x-required-roles: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLogin'
+            example:
+              username: "victor"
+              password: "Secret1234!"
+      responses:
+        '200':
+          description: Login correcto — devuelve access_token y refresh_token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Credenciales incorrectas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Incorrect username or password"
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Renovar el access token usando el refresh token
+      operationId: refreshToken
+      description: |
+        Emite un nuevo `access_token` a partir de un `refresh_token` válido.
+
+        **Endpoint público** — no requiere `access_token` (puede estar expirado).
+      security: []
+      x-required-roles: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+            example:
+              refresh_token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        '200':
+          description: Token renovado correctamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Refresh token inválido o expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Could not validate credentials"
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Obtener el perfil del usuario autenticado
+      operationId: getMe
+      description: |
+        Devuelve el perfil del usuario identificado por el `access_token`.
+
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      security:
+        - bearerAuth: []
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Perfil del usuario actual
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ----------------------------------------------------------
+  # ACUARIO
+  # ----------------------------------------------------------
+
+  /acuario:
+    get:
+      tags: [acuario]
+      summary: Listar todos los acuarios
+      operationId: listAcuarios
+      description: |
+        Devuelve la lista paginada de acuarios.
+
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/offsetParam'
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Filtrar por nombre (búsqueda parcial)
+        - in: query
+          name: volume
+          schema:
+            type: integer
+          description: Filtrar por volumen exacto (litros)
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [name, volume]
+            default: name
+          description: Campo por el que ordenar
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Dirección del ordenamiento
+      responses:
+        '200':
+          description: Lista de acuarios
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Acuario'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [acuario]
+      summary: Crear un nuevo acuario
+      operationId: createAcuario
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcuarioCreate'
+            example:
+              name: "Acuario tropical"
+              volume: 200
+      responses:
+        '201':
+          description: Acuario creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Acuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /acuario/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idParam'
+    get:
+      tags: [acuario]
+      summary: Obtener un acuario por ID
+      operationId: getAcuario
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Detalles del acuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Acuario'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [acuario]
+      summary: Actualizar un acuario
+      operationId: updateAcuario
+      description: |
+        `ROLE_USER` solo puede actualizar sus propios acuarios.
+        `ROLE_ADMIN` puede actualizar cualquiera.
+
+        **Roles requeridos:** `ROLE_USER` (propio) | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcuarioCreate'
+      responses:
+        '200':
+          description: Acuario actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Acuario'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [acuario]
+      summary: Eliminar un acuario
+      operationId: deleteAcuario
+      description: |
+        **Roles requeridos:** `ROLE_ADMIN`
+      x-required-roles: [ROLE_ADMIN]
+      responses:
+        '204':
+          description: Acuario eliminado correctamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ----------------------------------------------------------
+  # FISH
+  # ----------------------------------------------------------
+
+  /fish:
+    get:
+      tags: [fish]
+      summary: Listar todos los peces
+      operationId: listFish
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/offsetParam'
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Filtrar por nombre (búsqueda parcial)
+        - in: query
+          name: species
+          schema:
+            type: string
+          description: Filtrar por especie
+        - in: query
+          name: area_of_tank
+          schema:
+            type: string
+          description: Filtrar por zona del acuario
+        - in: query
+          name: acuarioId
+          schema:
+            type: integer
+          description: Filtrar por acuario
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [name, species, age]
+            default: name
+          description: Campo por el que ordenar
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Dirección del ordenamiento
+      responses:
+        '200':
+          description: Lista de peces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Fish'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [fish]
+      summary: Añadir un nuevo pez
+      operationId: createFish
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FishCreate'
+            example:
+              name: "Nemo"
+              species: "Amphiprioninae"
+              age: 2
+              behavior: "Pacífico"
+              area_of_tank: "Zona media"
+              acuarioId: 1
+      responses:
+        '201':
+          description: Pez creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fish'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /fish/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idParam'
+    get:
+      tags: [fish]
+      summary: Obtener un pez por ID
+      operationId: getFish
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Detalles del pez
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fish'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [fish]
+      summary: Actualizar un pez
+      operationId: updateFish
+      description: |
+        `ROLE_USER` solo puede actualizar sus propios peces.
+
+        **Roles requeridos:** `ROLE_USER` (propio) | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FishCreate'
+      responses:
+        '200':
+          description: Pez actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fish'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [fish]
+      summary: Eliminar un pez
+      operationId: deleteFish
+      description: |
+        **Roles requeridos:** `ROLE_ADMIN`
+      x-required-roles: [ROLE_ADMIN]
+      responses:
+        '204':
+          description: Pez eliminado correctamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ----------------------------------------------------------
+  # PLANTS
+  # ----------------------------------------------------------
+
+  /plants:
+    get:
+      tags: [plants]
+      summary: Listar todas las plantas
+      operationId: listPlants
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/offsetParam'
+        - in: query
+          name: name
+          schema:
+            type: string
+          description: Filtrar por nombre (búsqueda parcial)
+        - in: query
+          name: species
+          schema:
+            type: string
+          description: Filtrar por especie
+        - in: query
+          name: acuarioId
+          schema:
+            type: integer
+          description: Filtrar por acuario
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [name, species, age]
+            default: name
+          description: Campo por el que ordenar
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Dirección del ordenamiento
+      responses:
+        '200':
+          description: Lista de plantas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Plant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [plants]
+      summary: Añadir una nueva planta
+      operationId: createPlant
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlantCreate'
+            example:
+              name: "Anubias"
+              species: "Anubias barteri"
+              age: 1
+              acuarioId: 1
+      responses:
+        '201':
+          description: Planta creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /plants/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idParam'
+    get:
+      tags: [plants]
+      summary: Obtener una planta por ID
+      operationId: getPlant
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Detalles de la planta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [plants]
+      summary: Actualizar una planta
+      operationId: updatePlant
+      description: |
+        `ROLE_USER` solo puede actualizar sus propias plantas.
+
+        **Roles requeridos:** `ROLE_USER` (propio) | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlantCreate'
+      responses:
+        '200':
+          description: Planta actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plant'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [plants]
+      summary: Eliminar una planta
+      operationId: deletePlant
+      description: |
+        **Roles requeridos:** `ROLE_ADMIN`
+      x-required-roles: [ROLE_ADMIN]
+      responses:
+        '204':
+          description: Planta eliminada correctamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ----------------------------------------------------------
+  # LIGHTING
+  # ----------------------------------------------------------
+
+  /lighting:
+    get:
+      tags: [lighting]
+      summary: Listar todas las iluminaciones
+      operationId: listLighting
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/offsetParam'
+        - in: query
+          name: light_type
+          schema:
+            type: string
+          description: Filtrar por tipo de luz (LED, fluorescente...)
+        - in: query
+          name: wifi
+          schema:
+            type: boolean
+          description: Filtrar por conectividad wifi
+        - in: query
+          name: aquariumId
+          schema:
+            type: integer
+          description: Filtrar por acuario
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [light_type, watts, start_time]
+            default: light_type
+          description: Campo por el que ordenar
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+          description: Dirección del ordenamiento
+      responses:
+        '200':
+          description: Lista de iluminaciones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Lighting'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [lighting]
+      summary: Añadir una nueva iluminación
+      operationId: createLighting
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LightingCreate'
+            example:
+              light_type: "LED"
+              watts: 20
+              wifi: true
+              start_time: "08:00"
+              end_time: "20:00"
+              aquariumId: 1
+      responses:
+        '201':
+          description: Iluminación creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lighting'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /lighting/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idParam'
+    get:
+      tags: [lighting]
+      summary: Obtener una iluminación por ID
+      operationId: getLighting
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Detalles de la iluminación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lighting'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [lighting]
+      summary: Actualizar una iluminación
+      operationId: updateLighting
+      description: |
+        `ROLE_USER` solo puede actualizar sus propias iluminaciones.
+
+        **Roles requeridos:** `ROLE_USER` (propio) | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LightingCreate'
+      responses:
+        '200':
+          description: Iluminación actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lighting'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [lighting]
+      summary: Eliminar una iluminación
+      operationId: deleteLighting
+      description: |
+        **Roles requeridos:** `ROLE_ADMIN`
+      x-required-roles: [ROLE_ADMIN]
+      responses:
+        '204':
+          description: Iluminación eliminada correctamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ----------------------------------------------------------
+  # MAINTENANCE
+  # ----------------------------------------------------------
+
+  /maintenance:
+    get:
+      tags: [maintenance]
+      summary: Listar tareas de mantenimiento
+      operationId: listMaintenance
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/limitParam'
+        - $ref: '#/components/parameters/offsetParam'
+        - in: query
+          name: task
+          schema:
+            type: string
+          description: Filtrar por nombre de tarea (búsqueda parcial)
+        - in: query
+          name: date
+          schema:
+            type: string
+            format: date
+          description: Filtrar por fecha (YYYY-MM-DD)
+        - in: query
+          name: acuarioId
+          schema:
+            type: integer
+          description: Filtrar por acuario
+        - in: query
+          name: sort
+          schema:
+            type: string
+            enum: [task, date]
+            default: date
+          description: Campo por el que ordenar
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+          description: Dirección del ordenamiento
+      responses:
+        '200':
+          description: Lista de tareas de mantenimiento
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Maintenance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [maintenance]
+      summary: Crear una nueva tarea de mantenimiento
+      operationId: createMaintenance
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceCreate'
+            example:
+              task: "Cambio de agua parcial 30%"
+              date: "2026-03-16T10:00:00"
+              acuarioId: 1
+      responses:
+        '201':
+          description: Tarea de mantenimiento creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Maintenance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /maintenance/{id}:
+    parameters:
+      - $ref: '#/components/parameters/idParam'
+    get:
+      tags: [maintenance]
+      summary: Obtener una tarea de mantenimiento por ID
+      operationId: getMaintenance
+      description: |
+        **Roles requeridos:** `ROLE_USER` | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      responses:
+        '200':
+          description: Detalles de la tarea de mantenimiento
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Maintenance'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [maintenance]
+      summary: Actualizar una tarea de mantenimiento
+      operationId: updateMaintenance
+      description: |
+        `ROLE_USER` solo puede actualizar sus propias tareas.
+
+        **Roles requeridos:** `ROLE_USER` (propio) | `ROLE_ADMIN`
+      x-required-roles: [ROLE_USER, ROLE_ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceCreate'
+      responses:
+        '200':
+          description: Tarea de mantenimiento actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Maintenance'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [maintenance]
+      summary: Eliminar una tarea de mantenimiento
+      operationId: deleteMaintenance
+      description: |
+        **Roles requeridos:** `ROLE_ADMIN`
+      x-required-roles: [ROLE_ADMIN]
+      responses:
+        '204':
+          description: Tarea de mantenimiento eliminada correctamente
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+
+# ============================================================
+# COMPONENTS
+# ============================================================
+components:
+
+  # ----------------------------------------------------------
+  # Security schemes
+  # ----------------------------------------------------------
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token JWT obtenido en `POST /auth/login`.
+        Incluirlo en la cabecera: `Authorization: Bearer <token>`
+
+        - **access_token** expira en 30 minutos
+        - **refresh_token** expira en 7 días (usar `POST /auth/refresh`)
+
+  # ----------------------------------------------------------
+  # Reusable parameters
+  # ----------------------------------------------------------
+  parameters:
+    idParam:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      description: Identificador único del recurso
+    limitParam:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: Número máximo de resultados a devolver
+    offsetParam:
+      in: query
+      name: offset
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+      description: Número de resultados a omitir (paginación)
+
+  # ----------------------------------------------------------
+  # Reusable responses
+  # ----------------------------------------------------------
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido o expirado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Not authenticated"
+    Forbidden:
+      description: Sin permisos suficientes para esta operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Not enough permissions"
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Resource not found"
+    BadRequest:
+      description: Datos de entrada inválidos
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            detail: "Invalid input data"
+    UnprocessableEntity:
+      description: Error de validación en los campos del body
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationErrorResponse'
+
+  # ----------------------------------------------------------
+  # Schemas
+  # ----------------------------------------------------------
+  schemas:
+
+    # ---- Errores ----
+
+    ErrorResponse:
+      type: object
+      description: Respuesta de error genérica
+      properties:
+        detail:
+          type: string
+          description: Descripción del error
+          example: "Resource not found"
+      required:
+        - detail
+
+    ValidationErrorResponse:
+      type: object
+      description: Errores de validación de Pydantic/FastAPI
+      properties:
+        detail:
+          type: array
+          items:
+            type: object
+            properties:
+              loc:
+                type: array
+                items:
+                  type: string
+                example: ["body", "email"]
+              msg:
+                type: string
+                example: "value is not a valid email address"
+              type:
+                type: string
+                example: "value_error.email"
+      required:
+        - detail
+
+    # ---- Auth ----
+
+    UserRegister:
+      type: object
+      description: Datos para registrar un nuevo usuario (solo ROLE_ADMIN)
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 50
+          example: "victor"
+        email:
+          type: string
+          format: email
+          example: "victor@example.com"
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: "Mínimo 8 caracteres, al menos una mayúscula y un número"
+          example: "Secret1234!"
+        role:
+          type: string
+          enum: [ROLE_USER, ROLE_ADMIN]
+          default: ROLE_USER
+          description: Rol asignado al nuevo usuario
+      required:
+        - username
+        - email
+        - password
+
+    UserLogin:
+      type: object
+      description: Credenciales para iniciar sesión
+      properties:
+        username:
+          type: string
+          example: "victor"
+        password:
+          type: string
+          format: password
+          example: "Secret1234!"
+      required:
+        - username
+        - password
+
+    UserProfile:
+      type: object
+      description: Perfil público del usuario (sin contraseña)
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 1
+        username:
+          type: string
+          example: "victor"
+        email:
+          type: string
+          format: email
+          example: "victor@example.com"
+        role:
+          type: string
+          enum: [ROLE_USER, ROLE_ADMIN]
+          example: "ROLE_USER"
+        is_active:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-03-16T10:00:00"
+      required:
+        - id
+        - username
+        - email
+        - role
+        - is_active
+        - created_at
+
+    TokenResponse:
+      type: object
+      description: Tokens JWT devueltos tras login o refresh exitoso
+      properties:
+        access_token:
+          type: string
+          description: Token de acceso (expira en 30 min)
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig"
+        refresh_token:
+          type: string
+          description: Token de refresco (expira en 7 días)
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh.sig"
+        token_type:
+          type: string
+          default: "bearer"
+          example: "bearer"
+        expires_in:
+          type: integer
+          description: Segundos hasta la expiración del access_token
+          example: 1800
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - expires_in
+
+    TokenRefresh:
+      type: object
+      description: Body para renovar el access_token
+      properties:
+        refresh_token:
+          type: string
+          description: Refresh token obtenido en el login
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh.sig"
+      required:
+        - refresh_token
+
+    # ---- Entidades CRUD ----
+
+    Acuario:
+      type: object
+      description: Acuario con todos sus datos
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 1
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Acuario principal"
+        volume:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Volumen en litros
+          example: 200
+      required:
+        - name
+        - volume
+
+    AcuarioCreate:
+      type: object
+      description: Datos para crear o actualizar un acuario
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Acuario principal"
+        volume:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Volumen en litros
+          example: 200
+      required:
+        - name
+        - volume
+
+    Fish:
+      type: object
+      description: Pez con todos sus datos
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 5
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Nemo"
+        species:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Amphiprioninae"
+        age:
+          type: integer
+          minimum: 0
+          maximum: 20
+          example: 2
+        behavior:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Pacifico"
+        area_of_tank:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Zona media"
+        picture:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://example.com/nemo.jpg"
+        acuarioId:
+          type: integer
+          description: ID del acuario al que pertenece el pez
+          example: 1
+      required:
+        - name
+        - species
+        - age
+        - behavior
+        - area_of_tank
+        - acuarioId
+
+    FishCreate:
+      type: object
+      description: Datos para crear o actualizar un pez
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Nemo"
+        species:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Amphiprioninae"
+        age:
+          type: integer
+          minimum: 0
+          maximum: 20
+          example: 2
+        behavior:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Pacifico"
+        area_of_tank:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Zona media"
+        picture:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://example.com/nemo.jpg"
+        acuarioId:
+          type: integer
+          example: 1
+      required:
+        - name
+        - species
+        - age
+        - behavior
+        - area_of_tank
+        - acuarioId
+
+    Plant:
+      type: object
+      description: Planta con todos sus datos
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 3
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Anubias"
+        species:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Anubias barteri"
+        age:
+          type: integer
+          minimum: 0
+          maximum: 10
+          example: 1
+        picture:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://example.com/anubias.jpg"
+        description:
+          type: string
+          maxLength: 200
+          nullable: true
+          example: "Planta resistente y de bajo mantenimiento."
+        acuarioId:
+          type: integer
+          description: ID del acuario al que pertenece la planta
+          example: 1
+      required:
+        - name
+        - species
+        - age
+        - acuarioId
+
+    PlantCreate:
+      type: object
+      description: Datos para crear o actualizar una planta
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Anubias"
+        species:
+          type: string
+          minLength: 2
+          maxLength: 50
+          example: "Anubias barteri"
+        age:
+          type: integer
+          minimum: 0
+          maximum: 10
+          example: 1
+        picture:
+          type: string
+          format: uri
+          nullable: true
+          example: "https://example.com/anubias.jpg"
+        description:
+          type: string
+          maxLength: 200
+          nullable: true
+          example: "Planta resistente y de bajo mantenimiento."
+        acuarioId:
+          type: integer
+          example: 1
+      required:
+        - name
+        - species
+        - age
+        - acuarioId
+
+    Lighting:
+      type: object
+      description: Iluminacion con todos sus datos
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 2
+        light_type:
+          type: string
+          minLength: 2
+          maxLength: 30
+          description: Tipo de luz (LED, fluorescente, haluro metalico...)
+          example: "LED"
+        watts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Potencia en vatios
+          example: 20
+        wifi:
+          type: boolean
+          description: Dispone de conectividad wifi
+          example: true
+        start_time:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Hora de encendido (HH:mm)
+          example: "08:00"
+        end_time:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          description: Hora de apagado (HH:mm)
+          example: "20:00"
+        aquariumId:
+          type: integer
+          description: ID del acuario al que pertenece
+          example: 1
+      required:
+        - light_type
+        - watts
+        - wifi
+        - start_time
+        - end_time
+        - aquariumId
+
+    LightingCreate:
+      type: object
+      description: Datos para crear o actualizar una iluminacion
+      properties:
+        light_type:
+          type: string
+          minLength: 2
+          maxLength: 30
+          example: "LED"
+        watts:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          example: 20
+        wifi:
+          type: boolean
+          example: true
+        start_time:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "08:00"
+        end_time:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "20:00"
+        aquariumId:
+          type: integer
+          example: 1
+      required:
+        - light_type
+        - watts
+        - wifi
+        - start_time
+        - end_time
+        - aquariumId
+
+    Maintenance:
+      type: object
+      description: Tarea de mantenimiento con todos sus datos
+      properties:
+        id:
+          type: integer
+          readOnly: true
+          example: 10
+        task:
+          type: string
+          minLength: 3
+          maxLength: 100
+          example: "Cambio de agua parcial 30%"
+        date:
+          type: string
+          format: date-time
+          example: "2026-03-16T10:00:00"
+        acuarioId:
+          type: integer
+          description: ID del acuario al que pertenece la tarea
+          example: 1
+      required:
+        - task
+        - date
+        - acuarioId
+
+    MaintenanceCreate:
+      type: object
+      description: Datos para crear o actualizar una tarea de mantenimiento
+      properties:
+        task:
+          type: string
+          minLength: 3
+          maxLength: 100
+          example: "Cambio de agua parcial 30%"
+        date:
+          type: string
+          format: date-time
+          example: "2026-03-16T10:00:00"
+        acuarioId:
+          type: integer
+          example: 1
+      required:
+        - task
+        - date
+        - acuarioId
