@@ -5,13 +5,13 @@ sqlalchemy>=2.0
 aiomysql
 python-dotenv
 pydantic[email]>=2.0
-pymysql
-cryptography
+pymysql>=1.1.1
+cryptography>=46.0.5
 httpx>=0.23
 # Autenticación JWT
 python-jose[cryptography]
 bcrypt>=4.0
-python-multipart
+python-multipart>=0.0.22
 email-validator>=2.0
 # Otros útiles para desarrollo y pruebas
 pytest
